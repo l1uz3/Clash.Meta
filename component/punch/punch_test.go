@@ -18,7 +18,7 @@ func TestOptionDefaults(t *testing.T) {
 	if v.Fingerprint != testFP {
 		t.Fatalf("fingerprint not normalised: %q", v.Fingerprint)
 	}
-	if v.Attempts != 4 || v.Keep != 2 || v.Refresh != 60 || v.MaxAge <= v.Refresh {
+	if v.Attempts != 4 || v.Keep != 2 || v.Refresh != 60 || v.MaxAge <= v.Refresh || v.Window != 16384 {
 		t.Fatalf("unexpected defaults: %+v", v)
 	}
 	if len(v.ProbePorts) != 2 {
@@ -78,7 +78,7 @@ func TestWatchRouteDropsSessionsOnNetworkChange(t *testing.T) {
 	p := newPool(Option{Coordinator: "127.0.0.1:48080"})
 	a, b := net.Pipe()
 	defer b.Close()
-	s, err := yamux.Client(a, yamuxCfg())
+	s, err := yamux.Client(a, yamuxCfg(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,5 +95,14 @@ func TestWatchRouteDropsSessionsOnNetworkChange(t *testing.T) {
 	p.watchRoute()
 	if len(p.sess) != 0 || p.natMode != "" || !s.IsClosed() {
 		t.Fatalf("route change must drop sessions and re-probe: sess=%d nat=%q", len(p.sess), p.natMode)
+	}
+}
+
+func TestYamuxWindow(t *testing.T) {
+	if got := yamuxCfg(16384).MaxStreamWindowSize; got != 16384*1024 {
+		t.Fatalf("window not applied: %d", got)
+	}
+	if got := yamuxCfg(0).MaxStreamWindowSize; got != 256*1024 {
+		t.Fatalf("a zero window must keep the yamux default, got %d", got)
 	}
 }

@@ -44,6 +44,7 @@ type Option struct {
 	Refresh     int    `proxy:"refresh,omitempty"`         // seconds before the youngest session is refreshed (default 60)
 	MaxAge      int    `proxy:"max-age,omitempty"`         // seconds before a session stops taking new streams (default 110)
 	LocalPort   int    `proxy:"local-port-base,omitempty"` // first local port for punch tuples (default 50111)
+	Window      int    `proxy:"window,omitempty"`          // per-stream receive window in KiB (default 16384)
 }
 
 func (o *Option) withDefaults() (Option, error) {
@@ -76,6 +77,12 @@ func (o *Option) withDefaults() (Option, error) {
 	}
 	if v.LocalPort <= 0 {
 		v.LocalPort = 50111
+	}
+	// yamux's own 256 KiB window caps a stream at window/RTT: ~26 Mbit/s measured over a
+	// 100 ms path, against ~200 Mbit/s with 16 MiB. The window only bounds buffering, it is
+	// not preallocated.
+	if v.Window <= 0 {
+		v.Window = 16384
 	}
 	return v, nil
 }
@@ -493,8 +500,11 @@ func (p *pool) detectNAT() string {
 
 // ---------------- punch rounds ----------------
 
-func yamuxCfg() *yamux.Config {
+func yamuxCfg(windowKiB int) *yamux.Config {
 	c := yamux.DefaultConfig()
+	if windowKiB > 256 {
+		c.MaxStreamWindowSize = uint32(windowKiB) * 1024
+	}
 	c.EnableKeepAlive = true
 	c.KeepAliveInterval = 10 * time.Second // doubles as the NAT keepalive
 	c.ConnectionWriteTimeout = 20 * time.Second
@@ -522,7 +532,7 @@ func (p *pool) punchDirect(localPort int) bool {
 	if err != nil {
 		return false
 	}
-	sess, err := yamux.Client(conn, yamuxCfg())
+	sess, err := yamux.Client(conn, yamuxCfg(p.opt.Window))
 	if err != nil {
 		conn.Close()
 		return false
@@ -611,7 +621,7 @@ func (p *pool) punchPredict(localPort, keep int) int {
 				c.Close()
 				return
 			}
-			sess, err := yamux.Client(c, yamuxCfg())
+			sess, err := yamux.Client(c, yamuxCfg(p.opt.Window))
 			if err != nil {
 				c.Close()
 				return
