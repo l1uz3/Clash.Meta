@@ -159,6 +159,8 @@ type pool struct {
 	base    int
 	kick    chan struct{}
 	once    sync.Once
+
+	route string // local address the OS picks toward the coordinator; changes with the network
 }
 
 func newPool(o Option) *pool {
@@ -296,6 +298,7 @@ func (p *pool) maintain() {
 	refresh := time.Duration(p.opt.Refresh) * time.Second
 	maxAge := time.Duration(p.opt.MaxAge) * time.Second
 	for {
+		p.watchRoute()
 		if p.usable() > 0 && p.newestAge() < refresh {
 			p.retireOlderThan(maxAge)
 			select {
@@ -345,6 +348,48 @@ func (p *pool) maintain() {
 			log.Infoln("[punch] added %d session(s)", n)
 		}
 	}
+}
+
+// watchRoute is the desktop network-change signal. Android reports changes through the DNS
+// update, but on Windows/macOS without TUN nothing tells the core that Wi-Fi was switched, and
+// punched sessions would hang until keepalive gives up. When the local address the OS would use
+// toward the coordinator changes, the old sessions belong to a dead NAT mapping: drop them.
+// Under TUN the route points into the TUN, whose address is stable, so this never fires there;
+// the TUN interface monitor calls NetworkChanged instead.
+func (p *pool) watchRoute() {
+	cur := localRoute(p.opt.Coordinator)
+	if cur == "" {
+		return // offline or unresolvable: keep the last known route
+	}
+	p.mu.Lock()
+	prev := p.route
+	p.route = cur
+	p.mu.Unlock()
+	if prev != "" && prev != cur {
+		log.Infoln("[punch] network changed (%s -> %s); re-punching", prev, cur)
+		p.mu.Lock()
+		for _, s := range p.sess {
+			s.s.Close()
+		}
+		p.sess = nil
+		p.natMode = ""
+		p.mu.Unlock()
+	}
+}
+
+// localRoute asks the OS which local address it would use toward host. A UDP "connect" only
+// consults the routing table and sends nothing.
+func localRoute(coordinator string) string {
+	host, _, err := net.SplitHostPort(coordinator)
+	if err != nil {
+		return ""
+	}
+	c, err := net.Dial("udp", net.JoinHostPort(host, "9"))
+	if err != nil {
+		return ""
+	}
+	defer c.Close()
+	return c.LocalAddr().(*net.UDPAddr).IP.String()
 }
 
 // ---------------- protected sockets ----------------

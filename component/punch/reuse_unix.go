@@ -2,14 +2,13 @@
 
 package punch
 
-import "syscall"
+import "golang.org/x/sys/unix"
 
-// SO_REUSEPORT is 0x0F on Linux/Android; the syscall package does not export it for all targets.
-const soReusePort = 0x0F
-
+// unix.SO_REUSEPORT resolves per OS (0x0F on Linux/Android, 0x200 on macOS). A hard-coded
+// Linux value would silently set a different option on macOS and break punching there.
 func setReuse(fd int) error {
-	if err := syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+	if err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
 		return err
 	}
-	return syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, soReusePort, 1)
+	return unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 }
