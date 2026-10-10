@@ -11,6 +11,7 @@ require (
 	github.com/gobwas/ws v1.4.0
 	github.com/gofrs/uuid/v5 v5.4.0
 	github.com/golang/snappy v1.0.0
+	github.com/hashicorp/yamux v0.1.2
 	github.com/metacubex/age v0.0.0-20260603010618-28d156b4ea78
 	github.com/metacubex/amneziawg-go v0.0.0-20260908071407-0c1c6f40ecd7
 	github.com/metacubex/bart v0.29.0

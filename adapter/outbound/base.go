@@ -13,6 +13,7 @@ import (
 	"github.com/metacubex/mihomo/common/utils"
 	"github.com/metacubex/mihomo/component/dialer"
 	"github.com/metacubex/mihomo/component/proxydialer"
+	"github.com/metacubex/mihomo/component/punch"
 	"github.com/metacubex/mihomo/component/resolver"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/log"
@@ -191,12 +192,13 @@ func (b *Base) Close() error {
 }
 
 type BasicOption struct {
-	TFO         bool        `proxy:"tfo,omitempty"`
-	MPTCP       bool        `proxy:"mptcp,omitempty"`
-	Interface   string      `proxy:"interface-name,omitempty"`
-	RoutingMark int         `proxy:"routing-mark,omitempty"`
-	IPVersion   C.DNSPrefer `proxy:"ip-version,omitempty"`
-	DialerProxy string      `proxy:"dialer-proxy,omitempty"` // don't apply this option into groups, but can set a group name in a proxy
+	TFO         bool          `proxy:"tfo,omitempty"`
+	MPTCP       bool          `proxy:"mptcp,omitempty"`
+	Interface   string        `proxy:"interface-name,omitempty"`
+	RoutingMark int           `proxy:"routing-mark,omitempty"`
+	IPVersion   C.DNSPrefer   `proxy:"ip-version,omitempty"`
+	DialerProxy string        `proxy:"dialer-proxy,omitempty"` // don't apply this option into groups, but can set a group name in a proxy
+	Punch       *punch.Option `proxy:"punch,omitempty"`        // reach the server by TCP hole punching instead of a direct dial
 
 	//
 	// The following parameters are used internally, assign value by the structure decoder are disallowed
@@ -209,9 +211,18 @@ type BasicOption struct {
 func (b *BasicOption) NewDialer(opts []dialer.Option) C.Dialer {
 	cDialer := b.DialerForAPI
 	if cDialer == nil {
-		if b.DialerProxy != "" {
+		switch {
+		case b.Punch != nil:
+			pd, err := punch.NewDialer(*b.Punch)
+			if err != nil {
+				// fail closed: a broken punch block must not silently become a direct dial
+				log.Errorln("%v", err)
+				pd = punch.ErrorDialer(err)
+			}
+			cDialer = pd
+		case b.DialerProxy != "":
 			cDialer = proxydialer.NewByName(b.DialerProxy, b.NewTunnel())
-		} else {
+		default:
 			cDialer = dialer.NewDialer(opts...)
 		}
 	}
